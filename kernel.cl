@@ -2,9 +2,9 @@
 #define LWST2 64
 #define MOD2 30
 #define HALF_WARP 16
-#define MIN(a,b) = ((a) > (b) ? (b) : (a))
+#define MIN(a,b) ((a) > (b) ? (b) : (a))
 
-__kernel void UpdateVertex(
+/*__kernel void UpdateVertex(
 __global uint *edge_source,
 __global float *edge_weights,
 __global float *distances,
@@ -139,55 +139,80 @@ __global uint *num_edges //is this neccesary? should it be coputed with vertex_i
   }
   distances[start+local_id] = mins[local_id]; //Will be coalesced
 }
+*/
 
-__kernel void UpdateVertex3(
-__global uint *edge_source,
-__global float *edge_weights,
-__global float *distances,
-__global uint *vertex_index, //where the edges for a given vertex start in the edges arrays
-__global uint *num_edges //is this neccesary? should it be computed with vertex_index
+void LoadGlobalToLocalf(float __global *g, float __local *l, uint width, uint id);
+void LoadGlobalToLocali(uint __global *g, uint __local *l, uint width, uint id);
+
+inline void LoadGlobalToLocalf(float __global *g, float __local *l, uint width, uint id) {
+  l[id] = (id < width) ? g[id] : INFINITY;
+}
+
+inline void LoadGlobalToLocali(uint __global *g, uint __local *l, uint width, uint id) {
+  l[id] = (id < width) ? g[id] : 0;
+}
+
+__kernel void InitDistances(__global float *distances)
+{
+  uint thread_id = get_global_id(0);
+  if(thread_id)
+    distances[thread_id] = INFINITY;
+}
+
+
+__kernel void UpdateVertex(
+			   __global uint *edge_source,
+			   __global float *edge_weights,
+			   __global float *distances,
+			   __global uint *vertex_index, //where the edges for a given vertex start in the edges arrays
+			   __global uint *num_edges //is this neccesary? should it be computed with vertex_index
 )
 {
+  
   uint start = get_group_id(0) * LOCAL_WORK_SIZE;
   uint local_id = get_local_id(0);
-  int __local current_edge[LOCAL_WORK_SIZE];
-  int __local remaining_edges[LOCAL_WORK_SIZE];
+  uint __local current_edge[LOCAL_WORK_SIZE];
+  uint __local remaining_edges[LOCAL_WORK_SIZE];
   float __local e_weights[LOCAL_WORK_SIZE][HALF_WARP+1]; //since threads access this array colum
   uint __local  e_sources[LOCAL_WORK_SIZE][HALF_WARP+1];
-  int loading_id = local_id;
+  uint loading_id = local_id;
   int offset = 0;
-  int i;
-  float min = INFINITY;
+  uint i;
+  float min = distances[start+local_id];
   if(local_id >= HALF_WARP) {
     loading_id = local_id - (HALF_WARP);
     offset = 1;
   }
-  
   current_edge[local_id] = vertex_index[get_global_id(0)];
   remaining_edges[local_id] = num_edges[get_global_id(0)];
   
   while(remaining_edges[0] > 0) {
     for(i = 0; i < LOCAL_WORK_SIZE; i += 2) {
-      LoadLocalToGlobalf(edge_weights + current_edge[i+offset],
-			e_weights[i+offset], 
+      e_weights[i+offset][loading_id] = edge_weights[current_edge[i+offset]+loading_id];
+      e_sources[i+offset][loading_id] = edge_source[current_edge[i+offset]+loading_id];
+      /*
+      LoadLocalToGlobalf((edge_weights + current_edge[i+offset]),
+			 e_weights + (i+offset)*(HALF_WARP+1), 
 			remaining_edges[i+offset],
 			loading_id);
-      LoadLocalToGlobali(edge_source + current_edge[i+offset],
-			 e_sources[i+offset], 
+      LoadLocalToGlobali((edge_source + current_edge[i+offset]),
+			 e_sources + (i+offset)*(HALF_WARP+1), 
 			 remaining_edges[i+offset],
 			 loading_id);
+      */
     }
-    
-    int max = MIN(HALF_WARP,remaining_edges[local_id]);
-    for(i = 0; i < max ; i++) {
-      //possible optimization: see if the edge weight in question is,
-      //by itself, smaller than the min value so far
-      //if not, don't even bother with the global load from memory
-      min = MIN(min, 
-		e_weights[local_id][i] + 
-		distances[e_sources[local_id][i]]);
+    uint max = MIN(HALF_WARP,remaining_edges[local_id]);
+    for(i = 0; i < max; i++) {
+    //possible optimization: see if the edge weight in question is,
+    //by itself, smaller than the min value so far
+    //if not, don't even bother with the global load from memory
+      float temp = distances[e_sources[local_id][i]];
+      if(temp < INFINITY) {
+	temp = e_weights[local_id][i] + temp;
+	min = min > temp ? temp : min;
+      }
     }
-    current_edge += HALF_WARP
+    current_edge[local_id] += HALF_WARP;
     remaining_edges[local_id] -= HALF_WARP;
   }
   distances[start+local_id] = min;
