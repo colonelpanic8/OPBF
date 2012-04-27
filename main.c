@@ -27,8 +27,8 @@
 
 #define LOCAL_WORK_SIZE 32
 #define MAX_RANDOM_FLOAT 10
-#define DEFAULT_NUM_VERTICES 512*256
-#define DEFAULT_NUM_EDGES 64*DEFAULT_NUM_VERTICES
+#define DEFAULT_NUM_VERTICES 16*16
+#define DEFAULT_NUM_EDGES 16*DEFAULT_NUM_VERTICES
 
 #define DEFAULT_KERNEL_FILENAME ("kernel.cl")
 #define problem(...) fprintf(stderr, __VA_ARGS__)
@@ -149,9 +149,9 @@ void generate_graph(cl_uint *vertex_index, cl_uint *edge_count,
 		    cl_uint *edge_sources, float *edge_weights, cl_uint num_vertices, 
 		    cl_uint num_edges) 
 {
-  int edges_per_vertex = num_edges/num_vertices;
+  cl_uint edges_per_vertex = num_edges/num_vertices;
   int n = 0;
-  int i, j;
+  cl_uint i, j;
   srand(time(NULL));
   for(i = 0; i < num_vertices; i++) {
     vertex_index[i] = n;
@@ -225,7 +225,6 @@ int main(int argc, char **argv) {
   check_failure(err);
   err = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
   if (err != CL_SUCCESS) {
-    size_t len;
     char buffer[9999];
     
     problem("ERROR: Failed to build program executable! %s\n", GetErrorString(err));
@@ -263,6 +262,7 @@ int main(int argc, char **argv) {
   cl_mem _distances;
   cl_mem _vertex_index;
   cl_mem _edge_count;
+  cl_mem _update_check;
   
 
   
@@ -282,6 +282,8 @@ int main(int argc, char **argv) {
 				 sizeof(cl_uint)*num_vertices, NULL, NULL);
   _edge_count = clCreateBuffer(context,  CL_MEM_READ_ONLY,
 				 sizeof(cl_uint)*num_vertices, NULL, NULL);
+  _update_check = clCreateBuffer(context, CL_MEM_READ_WRITE,
+				 sizeof(cl_uint), NULL, NULL);
 
   
   if(!_edge_sources || !_edge_weights || !_distances || !_vertex_index || !_edge_count) {
@@ -317,6 +319,7 @@ int main(int argc, char **argv) {
   err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_distances);
   err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_vertex_index);
   err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_edge_count);
+  err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_update_check);
   
   check_failure(err);
 
@@ -349,10 +352,18 @@ int main(int argc, char **argv) {
   //Set distances
   clFinish(commands);
   //Run Kernel
-  int i;
-  for(i = 0; i < 100; i++) {
+  cl_uint i;
+  cl_uint update_check;
+  for(i = 0; i < num_vertices; i++) {
     err = clEnqueueNDRangeKernel(commands, update_vertex_kernel, 1, NULL, global, local, 0, NULL, NULL);
     clFinish(commands);
+    if(!i%10) {
+      /*err = clEnqueueReadBuffer(commands, _update_check, CL_TRUE,
+				0, sizeof(cl_uint),
+				&update_check, 0, NULL, NULL );*/
+    //clFinish(commands);
+      printf("%d, %d", update_check, i);
+    }
   }
   check_failure(err);
   clFinish(commands);
