@@ -162,15 +162,15 @@ void generate_graph(cl_uint *vertex_index, cl_uint *edge_count,
 		    cl_uint *edge_sources, float *edge_weights, cl_uint num_vertices, 
 		    cl_uint num_edges) 
 {
-  int edges_per_vertex = num_edges/num_vertices;
+  cl_uint edges_per_vertex = num_edges/num_vertices;
   int n = 0;
-  int i, j;
+  cl_uint i, j;
   srand(time(NULL));
   for(i = 0; i < num_vertices; i++) {
     vertex_index[i] = n;
     for(j = 0; j < edges_per_vertex; j++) {
       edge_sources[n+j] = rand() % num_vertices;
-      edge_weights[n+j] = rand() % 30;
+      edge_weights[n+j] = rand() % 400;
     }
     n += j;
     edge_count[i] = j;
@@ -238,7 +238,6 @@ int main(int argc, char **argv) {
   check_failure(err);
   err = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
   if (err != CL_SUCCESS) {
-    size_t len;
     char buffer[9999];
     
     problem("ERROR: Failed to build program executable! %s\n", GetErrorString(err));
@@ -357,12 +356,11 @@ int main(int argc, char **argv) {
   printf(BAR);*/
 
   
-  struct timeval start, end, delta;
-  gettimeofday(&start, NULL);
+
   //Set distances
   clFinish(commands);
   //Run Kernel
-  int i;
+  cl_uint i;
   err = clEnqueueReadBuffer(commands, _distances, CL_TRUE, 0, sizeof(cl_float)*num_vertices,
 			    result, 0, NULL, NULL );
   clFinish(commands);
@@ -377,6 +375,8 @@ int main(int argc, char **argv) {
   clFinish(commands);
   printArray(result, num_vertices);*/
   
+  struct timeval start, end, delta;
+  gettimeofday(&start, NULL);
   for(i = 0; i < num_vertices; i++) {
     err = clEnqueueNDRangeKernel(commands, update_vertex_kernel, 1, NULL, global, local, 0, NULL, NULL);
     clFinish(commands);
