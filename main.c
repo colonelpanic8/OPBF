@@ -27,12 +27,13 @@
 
 #define LOCAL_WORK_SIZE 32
 #define MAX_RANDOM_FLOAT 10
-#define DEFAULT_NUM_VERTICES 512*256
-#define DEFAULT_NUM_EDGES 64*DEFAULT_NUM_VERTICES
+#define DEFAULT_NUM_VERTICES 32
+#define DEFAULT_NUM_EDGES 16*DEFAULT_NUM_VERTICES
 
 #define DEFAULT_KERNEL_FILENAME ("kernel.cl")
 #define problem(...) fprintf(stderr, __VA_ARGS__)
 #define BAR "--------------------------------------------------------------------------------\n"
+#define PRINT_ROW_LENGTH 32
 
 /*--------------------------------------------------------------------------------*/
 
@@ -132,16 +133,28 @@ void check_failure(cl_int err) {
 }
 
 void printArray(cl_float *matrix, cl_int num) {
-  int i;
-  for(i = 0; i < num; i++) {
-    printf("%4.0f ", matrix[i]);
+  int i,j;
+  for(i = 0; i < num; i += PRINT_ROW_LENGTH) {
+    for(j = 0; j < PRINT_ROW_LENGTH; j++) {
+      if(i+j > num)
+	break;
+      printf("%3d ", i+j);
+    }
+    printf("\n");
+    for(j = 0; j < PRINT_ROW_LENGTH; j++) {
+      if(i+j > num)
+	break;
+      printf("%3.0f ", matrix[i+j]);
+    }
+    printf("\n");
+    printf(BAR);
   }
 }
 
 void UIprintArray(cl_uint *matrix, cl_int num) {
   int i;
   for(i = 0; i < num; i++) {
-    printf("%4ud ", matrix[i]);
+    printf("%3ud ", matrix[i]);
   }
 }
 
@@ -157,7 +170,7 @@ void generate_graph(cl_uint *vertex_index, cl_uint *edge_count,
     vertex_index[i] = n;
     for(j = 0; j < edges_per_vertex; j++) {
       edge_sources[n+j] = rand() % num_vertices;
-      edge_weights[n+j] = (float)1.0;
+      edge_weights[n+j] = rand() % 30;
     }
     n += j;
     edge_count[i] = j;
@@ -331,18 +344,18 @@ int main(int argc, char **argv) {
   clEnqueueNDRangeKernel(commands, init_distances_kernel, 1, NULL, global, NULL, 0, NULL, NULL);
   cl_float *result;
   result = (cl_float *)malloc(sizeof(cl_float)*num_vertices);
-  cl_uint *data;
-  data = (cl_uint *)malloc(sizeof(cl_uint)*num_edges);
+  cl_float *data;
+  data = (cl_float *)malloc(sizeof(cl_uint)*num_edges);
   
   clFinish(commands);
 
-  /*
-  err = clEnqueueReadBuffer(commands, _distances, CL_TRUE, 0, sizeof(cl_float)*num_vertices,
-			    result, 0, NULL, NULL );
-  err = clEnqueueReadBuffer(commands, _edge_sources, CL_TRUE, 0, sizeof(cl_uint)*num_edges,
-			    data, 0, NULL, NULL );
 
-			    printArray(result, num_vertices);*/
+  /*err = clEnqueueReadBuffer(commands, _edge_weights, CL_TRUE, 0, sizeof(cl_float)*num_edges,
+			    data, 0, NULL, NULL );
+  printArray(data, num_edges);
+  printf("\n");
+  printf(BAR);*/
+
   
   struct timeval start, end, delta;
   gettimeofday(&start, NULL);
@@ -350,9 +363,28 @@ int main(int argc, char **argv) {
   clFinish(commands);
   //Run Kernel
   int i;
-  for(i = 0; i < 100; i++) {
+  err = clEnqueueReadBuffer(commands, _distances, CL_TRUE, 0, sizeof(cl_float)*num_vertices,
+			    result, 0, NULL, NULL );
+  clFinish(commands);
+  printArray(result, num_vertices);
+  printf("\n");
+  printf(BAR);
+  
+  /*err = clEnqueueNDRangeKernel(commands, update_vertex_kernel, 1, NULL, global, local, 0, NULL, NULL);
+  clFinish(commands);
+  err = clEnqueueReadBuffer(commands, _distances, CL_TRUE, 0, sizeof(cl_float)*num_vertices,
+			    result, 0, NULL, NULL );
+  clFinish(commands);
+  printArray(result, num_vertices);*/
+  
+  for(i = 0; i < num_vertices; i++) {
     err = clEnqueueNDRangeKernel(commands, update_vertex_kernel, 1, NULL, global, local, 0, NULL, NULL);
     clFinish(commands);
+    //Printing
+    err = clEnqueueReadBuffer(commands, _distances, CL_TRUE, 0, sizeof(cl_float)*num_vertices,
+			      result, 0, NULL, NULL );
+    clFinish(commands);
+    printArray(result, num_vertices);
   }
   check_failure(err);
   clFinish(commands);
