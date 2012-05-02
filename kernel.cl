@@ -165,7 +165,7 @@ __kernel void UpdateVertex(
 			   __global float *edge_weights,
 			   __global float *distances,
 			   __global uint *vertex_index, //where the edges for a given vertex start in the edges arrays
-			   __global uint *num_edges //is this neccesary? should it be computed with vertex_index
+			   __global uint *num_edges //is this neccesary? should it be computed with vertex_index			   
 )
 {
   
@@ -179,6 +179,7 @@ __kernel void UpdateVertex(
   uint offset = 0;
   uint i;
   float min = distances[start+local_id];
+  bool __local did_update = 0;
   if(local_id >= HALF_WARP) {
     loading_id = local_id - (HALF_WARP);
     offset = 1;
@@ -193,16 +194,25 @@ __kernel void UpdateVertex(
 	e_sources[i+offset][loading_id] = edge_source[current_edge[i+offset]+loading_id];
       }
     }
+    barrier(CLK_LOCAL_MEM_FENCE);
     uint max = MIN(HALF_WARP,remaining_edges[local_id]);
     for(i = 0; i < max; i++) {
       float temp = distances[e_sources[local_id][i]];
       if(temp < INFINITY) {
 	temp = e_weights[local_id][i] + temp;
-	min = min > temp ? temp : min;
+	if(min > temp) {
+	  did_update = 1;
+	  min = temp;
+	}
       }
     }
     current_edge[local_id] += HALF_WARP;
     remaining_edges[local_id] -= HALF_WARP;
   }
-  distances[start+local_id] = min;
+  barrier(CLK_LOCAL_MEM_FENCE);
+  if(did_update) {
+    distances[start+local_id] = min;
+  } else{
+    distances[start+local_id] = 0;
+  }
 }

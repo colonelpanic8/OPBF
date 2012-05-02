@@ -27,7 +27,7 @@
 
 #define LOCAL_WORK_SIZE 32
 #define MAX_RANDOM_FLOAT 10
-#define DEFAULT_NUM_VERTICES 32
+#define DEFAULT_NUM_VERTICES 64
 #define DEFAULT_NUM_EDGES 16*DEFAULT_NUM_VERTICES
 
 #define DEFAULT_KERNEL_FILENAME ("kernel.cl")
@@ -275,6 +275,7 @@ int main(int argc, char **argv) {
   cl_mem _distances;
   cl_mem _vertex_index;
   cl_mem _edge_count;
+  cl_mem _update;
   
 
   
@@ -292,11 +293,13 @@ int main(int argc, char **argv) {
 				 sizeof(cl_float)*num_vertices, NULL, NULL);
   _vertex_index = clCreateBuffer(context,  CL_MEM_READ_ONLY,
 				 sizeof(cl_uint)*num_vertices, NULL, NULL);
-  _edge_count = clCreateBuffer(context,  CL_MEM_READ_ONLY,
+  _edge_count   = clCreateBuffer(context,  CL_MEM_READ_ONLY,
 				 sizeof(cl_uint)*num_vertices, NULL, NULL);
+  _update       = clCreateBuffer(context, CL_MEM_READ_WRITE,
+				 sizeof(cl_uint), NULL, NULL);
 
   
-  if(!_edge_sources || !_edge_weights || !_distances || !_vertex_index || !_edge_count) {
+  if(!_edge_sources || !_edge_weights || !_distances || !_vertex_index || !_edge_count || !_update) {
     problem("Failed to allocate device memory.\n");
     exit(-1);
   }
@@ -329,6 +332,7 @@ int main(int argc, char **argv) {
   err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_distances);
   err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_vertex_index);
   err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_edge_count);
+  //err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_update);
   
   check_failure(err);
 
@@ -384,6 +388,7 @@ int main(int argc, char **argv) {
     err = clEnqueueReadBuffer(commands, _distances, CL_TRUE, 0, sizeof(cl_float)*num_vertices,
 			      result, 0, NULL, NULL );
     clFinish(commands);
+    printf("Round %d\n", i);
     printArray(result, num_vertices);
   }
   check_failure(err);
