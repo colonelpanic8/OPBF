@@ -29,7 +29,7 @@ inline void LoadGlobalToLocali(uint __global *g, uint __local *l, uint width, ui
 __kernel void InitDistances(__global float *distances)
 {
   uint thread_id = get_global_id(0);
-  if(thread_id != 4)
+  if(thread_id != 16)
     distances[thread_id] = INFINITY;
 }
 
