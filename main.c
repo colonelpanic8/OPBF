@@ -27,8 +27,8 @@
 
 #define LOCAL_WORK_SIZE 32
 #define MAX_RANDOM_FLOAT 10
-#define DEFAULT_NUM_VERTICES 32*16*16*16
-#define DEFAULT_NUM_EDGES 4*DEFAULT_NUM_VERTICES
+#define DEFAULT_NUM_VERTICES 32*2
+#define DEFAULT_NUM_EDGES 5*DEFAULT_NUM_VERTICES
 
 #define DEFAULT_KERNEL_FILENAME ("kernel.cl")
 #define problem(...) fprintf(stderr, __VA_ARGS__)
@@ -152,9 +152,21 @@ void printArray(cl_float *matrix, cl_int num) {
 }
 
 void UIprintArray(cl_uint *matrix, cl_int num) {
-  int i;
-  for(i = 0; i < num; i++) {
-    printf("%3ud ", matrix[i]);
+  int i,j;
+  for(i = 0; i < num; i += PRINT_ROW_LENGTH) {
+    for(j = 0; j < PRINT_ROW_LENGTH; j++) {
+      if(i+j > num)
+	break;
+      printf("%3d ", i+j);
+    }
+    printf("\n");
+    for(j = 0; j < PRINT_ROW_LENGTH; j++) {
+      if(i+j > num)
+	break;
+      printf("%3d ", matrix[i+j]);
+    }
+    printf("\n");
+    printf(BAR);
   }
 }
 
@@ -177,6 +189,34 @@ void generate_graph(cl_uint *vertex_index, cl_uint *edge_count,
   }
   
 }
+
+void generate_graph2(cl_uint *vertex_index, cl_uint *edge_count,
+		    cl_uint *edge_sources, float *edge_weights, cl_uint num_vertices, 
+		    cl_uint num_edges) 
+{
+  cl_uint edges_per_vertex = num_edges/num_vertices;
+  int n = 0;
+  cl_uint i, j;
+  srand(time(NULL));
+  for(i = 0; i < num_vertices; i++) {
+    vertex_index[i] = n;
+    for(j = 0; j < edges_per_vertex; j++) {
+      edge_sources[n+j] = rand() % num_vertices;
+      edge_weights[n+j] = rand() % 1000;
+    }
+    n += j;
+    edge_count[i] = j;
+  }
+}
+
+cl_float *generate_matrix(cl_uint *vertex_index, cl_uint *edge_count,
+			  cl_uint *edge_sources, float *edge_weights, cl_uint num_vertices, 
+			  cl_uint num_edges) {
+  int i;
+  cl_float *output = malloc(num_vertices*num_vertices*sizeof(cl_float));
+  for(i = 0; i < num_edges; i++)
+}
+
 
 /*--------------------------------------------------------------------------------*/
 
@@ -347,8 +387,11 @@ int main(int argc, char **argv) {
   clEnqueueNDRangeKernel(commands, init_distances_kernel, 1, NULL, global, NULL, 0, NULL, NULL);
   cl_float *result;
   result = (cl_float *)malloc(sizeof(cl_float)*num_vertices);
+  /*
   cl_float *data;
   data = (cl_float *)malloc(sizeof(cl_uint)*num_edges);
+  cl_uint *check;
+  check = (cl_uint *)malloc(sizeof(cl_uint)*num_vertices);*/
   
   clFinish(commands);
 
@@ -371,7 +414,11 @@ int main(int argc, char **argv) {
   err = clEnqueueReadBuffer(commands, _distances, CL_TRUE, 0, sizeof(cl_float)*num_vertices,
 			    result, 0, NULL, NULL );
   clFinish(commands);
-  printArray(result, num_vertices);*/
+  printArray(result, num_vertices);
+  err = clEnqueueReadBuffer(commands, _edge_count, CL_TRUE, 0, sizeof(cl_float)*num_vertices,
+				check, 0, NULL, NULL );
+  if(num_vertices < 128) UIprintArray(check, num_vertices);
+  return 0;*/
   
   struct timeval start, end, delta;
   gettimeofday(&start, NULL);
