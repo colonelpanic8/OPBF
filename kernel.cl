@@ -4,6 +4,12 @@
 #define HALF_WARP 16
 #define MIN(a,b) ((a) > (b) ? (b) : (a))
 
+typedef struct _edge {
+  cl_uint source;
+  cl_uint dest;
+  cl_float weight;
+} edge;
+
 void LoadGlobalToLocalf(float __global *g, float __local *l, uint width, uint id);
 void LoadGlobalToLocali(uint __global *g, uint __local *l, uint width, uint id);
 

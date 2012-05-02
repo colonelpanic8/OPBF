@@ -25,6 +25,13 @@
 
 /*--------------------------------------------------------------------------------*/
 
+typedef int (*Compare_fn)(const void *, const void *);
+typedef struct _edge {
+  cl_uint source;
+  cl_uint dest;
+  cl_float weight;
+} edge;
+
 #define PRINT
 //#define DOMM
 #define LOCAL_WORK_SIZE 32
@@ -35,7 +42,7 @@
 #define DEFAULT_KERNEL_FILENAME ("kernel.cl")
 #define problem(...) fprintf(stderr, __VA_ARGS__)
 #define BAR "--------------------------------------------------------------------------------\n"
-#define PRINT_ROW_LENGTH 32
+#define PRINT_ROW_LENGTH 16
 
 /*--------------------------------------------------------------------------------*/
 
@@ -210,6 +217,66 @@ void generate_graph2(cl_uint *vertex_index, cl_uint *edge_count,
     edge_count[i] = j;
   }
 }
+
+void print_edges(edge *edges, cl_uint num) {
+  int i,j;
+  for(i = 0; i < num; i += PRINT_ROW_LENGTH) {
+    for(j = 0; j < PRINT_ROW_LENGTH; j++) {
+      if(i+j >= num)
+	break;
+      printf("%7d     ", i+j);
+    }
+    printf("\n");
+    for(j = 0; j < PRINT_ROW_LENGTH; j++) {
+      if(i+j >= num)
+	break;
+      printf("%3u %3u %3.0f|", edges[i+j].dest, edges[i+j].source, edges[i+j].weight);
+    }
+    printf("\n");
+    printf(BAR);
+  }
+}
+
+int destcomp(const void *a, const void *b) {
+  edge *f = (edge *) a;
+  edge *s = (edge *) b;
+  return f->dest - s->dest;
+}
+
+cl_uint graph_data_from_file(char *filename, edge **res, cl_uint *a){
+  FILE *file;
+  char buffer[256];
+  size_t i;
+  edge *edges;
+  cl_uint max;
+  max = 0;
+  file = fopen(filename, "r");
+  buffer[0] = '\0';
+
+  while(buffer[0] != 'a')
+    fgets(buffer, 256, file);
+  for(i = 1; fgets(buffer, 256, file); i++);
+  edges = (edge *)malloc(sizeof(edge)*i);
+  fseek(file, 0, SEEK_SET);
+  while(buffer[0] != 'a')
+    fgets(buffer, 256, file);
+  i = 0;
+  buffer[0] = '\0';
+  while(buffer[0] != 'a')
+    fgets(buffer, 256, file);
+  do {
+    sscanf(buffer, "a %u %u %f", &(edges[i].dest), &(edges[i].source), &(edges[i].weight));
+    if(edges[i].dest > max) 
+      max = edges[i].dest;
+    i++;
+  } while(fgets(buffer, 256, file));
+  print_edges(edges, 128);
+  mergesort(edges, i, sizeof(edge), destcomp);
+  *res = edges;
+  *a = max;
+  return i;
+}
+
 
 
 /*--------------------------------------------------------------------------------*/
@@ -491,6 +558,11 @@ cl_float *matrix_multiply(cl_program program, cl_context context, cl_command_que
 
 int main(int argc, char **argv) {
   cl_int err;
+  edge *edges;
+  cl_uint max;
+  cl_uint num = graph_data_from_file("NewYorkRM", &edges, &max);
+  print_edges(edges, 128);
+  return 0;
 
   //Get device id.
   cl_device_id device_id;
