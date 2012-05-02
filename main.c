@@ -30,7 +30,7 @@ typedef struct _edge {
   cl_uint source;
   cl_uint dest;
   cl_float weight;
-}__attribute__ ((aligned (16))) edge;
+} __attribute__ ((aligned (16))) edge;
 
 typedef struct _gpu_edge {
   cl_uint source;
@@ -40,7 +40,14 @@ typedef struct _gpu_edge {
 typedef struct _vertex {
   cl_uint num_edges;
   cl_uint index;
-} vertex;
+  cl_uint spot;
+  
+} __attribute__ ((aligned (16))) vertex;
+
+typedef struct _gpu_vertex {
+  cl_uint num_edges;
+  cl_uint index;
+} gpu_vertex;
 
 
 
@@ -285,6 +292,12 @@ cl_uint graph_data_from_file(char *filename, edge **res){
   return i;
 }
 
+int countcomp(const void *a, const void *b) {
+  vertex *f = (vertex *) a;
+  vertex *s = (vertex *) b;
+  return s->num_edges - f->num_edges;
+}
+
 cl_uint build_vertex_array(edge *edges, cl_uint edge_count, vertex **v) {
   cl_uint max = edges[edge_count - 1].dest;
   vertex *vertices = (vertex *)malloc(sizeof(vertex)*max);
@@ -297,14 +310,23 @@ cl_uint build_vertex_array(edge *edges, cl_uint edge_count, vertex **v) {
     }
     vertices[i].num_edges = j - last;
     vertices[i].index = last;
+    vertices[i].spot = i;
     last = j;
     i = edges[j].dest;
   }
+  mergesort(vertices, max, sizeof(vertex), countcomp);
   *v = vertices;
   return max;
 }
 
-
+cl_uint *make_map(vertex *v, cl_uint max) {
+  cl_uint i;
+  cl_uint *o = (cl_uint *)malloc(sizeof(cl_uint)*max);
+  for(i = 0; i < max; i++) {
+    o[v[i].spot] = i;
+  }
+  return o;
+}
 
 /*--------------------------------------------------------------------------------*/
 
@@ -649,6 +671,7 @@ int main(int argc, char **argv) {
   
   cl_uint num_edges = graph_data_from_file(name, &edges);
   cl_uint num_vertices  = build_vertex_array(edges, num_edges, &vertices);
+  cl_uint *map = make_map(vertices, num_vertices);
   cl_float *distances = (cl_float *)malloc(sizeof(cl_float)*num_vertices);
   
   cl_mem _edges;
@@ -656,10 +679,9 @@ int main(int argc, char **argv) {
   cl_mem _distances;
   cl_mem _update;
   cl_mem _preds;
+  cl_mem _map;
   
 
-  
-  
   printf("Creating data buffers.\n");
   printf(BAR);
   //Create data buffers on the device.
@@ -673,11 +695,13 @@ int main(int argc, char **argv) {
 				 sizeof(edge)*num_edges,   NULL, NULL);
   _vertices     = clCreateBuffer(context,  CL_MEM_READ_ONLY,
 				 sizeof(vertex)*num_vertices, NULL, NULL);
+  _map          = clCreateBuffer(context,  CL_MEM_READ_ONLY,
+				 sizeof(cl_uint)*num_vertices, NULL, NULL);
   _update       = clCreateBuffer(context, CL_MEM_READ_WRITE,
 				 sizeof(cl_uint), NULL, NULL);
 
   
-  if(!_vertices || !_edges || !_distances || !_update) {
+  if(!_vertices || !_edges || !_distances || !_update || !_map) {
     problem("Failed to allocate device memory.\n");
     exit(-1);
   }
@@ -689,6 +713,8 @@ int main(int argc, char **argv) {
 			       sizeof(edge)*num_edges , edges, 0, NULL, NULL);
   err |=  clEnqueueWriteBuffer(commands, _vertices, CL_TRUE, 0,
 			       sizeof(vertex)*num_vertices, vertices, 0, NULL, NULL);
+  err |=  clEnqueueWriteBuffer(commands, _map, CL_TRUE, 0,
+			       sizeof(cl_uint)*num_vertices, map, 0, NULL, NULL);
 
   check_failure(err);
 
@@ -706,6 +732,7 @@ int main(int argc, char **argv) {
   err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_preds);
   err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_vertices);
   err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_update);
+  err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_map);
   err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_uint), &num_vertices);
   err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_uint), &num_edges);
   
@@ -726,7 +753,7 @@ int main(int argc, char **argv) {
   clFinish(commands);
   cl_uint i;
   cl_uint update;
-  cl_uint *preds = (cl_uint *)malloc(sizeof(cl_uint)*num_vertices);
+  //cl_uint *preds = (cl_uint *)malloc(sizeof(cl_uint)*num_vertices);
   struct timeval start, end, delta;
   gettimeofday(&start, NULL);
   for(i = 0; i < num_vertices; i++) {

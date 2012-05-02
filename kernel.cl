@@ -13,7 +13,8 @@ typedef struct _edge {
 typedef struct _vertex {
   uint num_edges;
   uint index;
-} vertex;
+  uint spot;
+} __attribute__ ((aligned (16))) vertex;
 
 void LoadGlobalToLocalf(float __global *g, float __local *l, uint width, uint id);
 void LoadGlobalToLocali(uint __global *g, uint __local *l, uint width, uint id);
@@ -40,6 +41,7 @@ __kernel void UpdateVertex(
 			   __global uint *preds,
 			   __global vertex *vertices,
 			   __global uint *update,
+			   __global uint *map,
 			   uint num_vertices,
 			   uint num_edges
 )
@@ -84,7 +86,7 @@ __kernel void UpdateVertex(
     barrier(CLK_LOCAL_MEM_FENCE);
     uint max = MIN(HALF_WARP,remaining_edges[local_id]);
     for(i = 0; i < max; i++) {
-      float temp = distances[work[local_id][i].source];
+      float temp = distances[map[work[local_id][i].source]];
       if(temp < INFINITY) {
 	temp = work[local_id][i].weight + temp;
 	if(min > temp) {
