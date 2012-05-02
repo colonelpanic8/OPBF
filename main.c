@@ -35,7 +35,7 @@ typedef struct _edge {
 typedef struct _gpu_edge {
   cl_uint source;
   cl_float weight;
-} gpu_edge;
+} cl_edge;
 
 typedef struct _vertex {
   cl_uint num_edges;
@@ -47,7 +47,7 @@ typedef struct _vertex {
 typedef struct _gpu_vertex {
   cl_uint num_edges;
   cl_uint index;
-} gpu_vertex;
+} cl_vertex;
 
 
 
@@ -166,13 +166,13 @@ void printArray(cl_float *matrix, cl_int num) {
     for(j = 0; j < PRINT_ROW_LENGTH; j++) {
       if(i+j > num)
 	break;
-      printf("%4d ", i+j);
+      printf("%8d ", i+j);
     }
     printf("\n");
     for(j = 0; j < PRINT_ROW_LENGTH; j++) {
       if(i+j > num)
 	break;
-      printf("%4.0f ", matrix[i+j]);
+      printf("%8.0f ", matrix[i+j]);
     }
     printf("\n");
     printf(BAR);
@@ -326,6 +326,26 @@ cl_uint *make_map(vertex *v, cl_uint max) {
     o[v[i].spot] = i;
   }
   return o;
+}
+
+cl_edge *make_gpu_edges(edge *edges, cl_uint num_edges) {
+  cl_uint i;
+  cl_edge *res = malloc(sizeof(cl_edge)*num_edges);
+  for(i = 0; i < num_edges; i++) {
+    res[i].source = edges[i].source;
+    res[i].weight = edges[i].weight;
+  }
+  return res;
+}
+
+cl_vertex *mak_gpu_vertices(vertex *vertices, cl_uint num_vertices) {
+  cl_uint i;
+  cl_edge *res = malloc(sizeof(cl_vertex)*num_vertices);
+  for(i = 0; i < num_vertices; i++) {
+    res[i].source = vertices[i].num_edges;
+    res[i].weight = vertices[i].index;
+  }
+  return res;
 }
 
 /*--------------------------------------------------------------------------------*/
@@ -667,11 +687,21 @@ int main(int argc, char **argv) {
 
   edge *edges;
   vertex *vertices;
-  char name[] = "NewYorkRM";
+  char buffer[256] = "NewYorkRM";
+  char *name;
+  if(argc > 1) {
+    name = argv[1];
+  } else{
+    name = buffer;
+  }
+  
   
   cl_uint num_edges = graph_data_from_file(name, &edges);
   cl_uint num_vertices  = build_vertex_array(edges, num_edges, &vertices);
   cl_uint *map = make_map(vertices, num_vertices);
+  cl_edge *device_edges = make_gpu_edges(edges, num_edges);
+  cl_vertex *device_vertices = make_gpu_vertices(vertices, num_vertices);
+  
   cl_float *distances = (cl_float *)malloc(sizeof(cl_float)*num_vertices);
   
   cl_mem _edges;
