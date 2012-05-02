@@ -29,7 +29,7 @@ inline void LoadGlobalToLocali(uint __global *g, uint __local *l, uint width, ui
 __kernel void InitDistances(__global float *distances)
 {
   uint thread_id = get_global_id(0);
-  if(thread_id)
+  if(thread_id != 4)
     distances[thread_id] = INFINITY;
 }
 
@@ -37,6 +37,7 @@ __kernel void InitDistances(__global float *distances)
 __kernel void UpdateVertex(
 			   __global edge *edges,
 			   __global float *distances,
+			   __global uint *preds,
 			   __global vertex *vertices,
 			   __global uint *update,
 			   uint num_vertices,
@@ -53,7 +54,8 @@ __kernel void UpdateVertex(
   int loading_id = local_id;
   uint offset = 0;
   uint i;
-  float min = distances[start+local_id];
+  float min;
+  uint pred;
   bool __local did_update = 0;
   bool __local done = 0;
   if(gid == 0) update[0] = 0;
@@ -63,10 +65,14 @@ __kernel void UpdateVertex(
   }
   if(gid < num_vertices) {
     nodes[local_id] = vertices[gid];
+    barrier(CLK_LOCAL_MEM_FENCE);
     remaining_edges[local_id] = nodes[local_id].num_edges;
     current_edge[local_id] = nodes[local_id].index;
+    min = distances[start+local_id];
+    pred = preds[start+local_id];
   } else {
     remaining_edges[local_id] = 0;
+    min = INFINITY;
   }
   barrier(CLK_LOCAL_MEM_FENCE);
   while(!done) {
@@ -82,8 +88,9 @@ __kernel void UpdateVertex(
       if(temp < INFINITY) {
 	temp = work[local_id][i].weight + temp;
 	if(min > temp) {
-	  did_update = 1;
-	  min = temp;
+	    did_update = 1;
+	    min = temp;
+	    pred = work[local_id][i].source;
 	}
       }
     }
@@ -97,6 +104,7 @@ __kernel void UpdateVertex(
   }
   if(did_update) {
     distances[start+local_id] = min;
+    preds[start+local_id] = pred;
     if(local_id == 0) update[0] = 1;
   }
 }

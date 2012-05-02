@@ -655,6 +655,7 @@ int main(int argc, char **argv) {
   cl_mem _vertices;
   cl_mem _distances;
   cl_mem _update;
+  cl_mem _preds;
   
 
   
@@ -666,6 +667,8 @@ int main(int argc, char **argv) {
   
   _distances    = clCreateBuffer(context, CL_MEM_READ_WRITE,
 				 sizeof(cl_float)*num_vertices, NULL, NULL);
+  _preds        = clCreateBuffer(context, CL_MEM_READ_WRITE,
+				 sizeof(cl_uint)*num_vertices, NULL, NULL);
   _edges        = clCreateBuffer(context,  CL_MEM_READ_ONLY,
 				 sizeof(edge)*num_edges,   NULL, NULL);
   _vertices     = clCreateBuffer(context,  CL_MEM_READ_ONLY,
@@ -700,6 +703,7 @@ int main(int argc, char **argv) {
 
   err  =  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_edges);
   err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_distances);
+  err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_preds);
   err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_vertices);
   err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_update);
   err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_uint), &num_vertices);
@@ -716,74 +720,37 @@ int main(int argc, char **argv) {
   //Run our program.
 
 
- clEnqueueNDRangeKernel(commands, init_distances_kernel, 1, NULL, global, NULL, 0, NULL, NULL);
+  clEnqueueNDRangeKernel(commands, init_distances_kernel, 1, NULL, global, NULL, 0, NULL, NULL);
   cl_float *result;
-  result = (cl_float *)malloc(sizeof(cl_float)*num_vertices);
-  /*
-  cl_float *data;
-  data = (cl_float *)malloc(sizeof(cl_uint)*num_edges);
-  cl_uint *check;
-  check = (cl_uint *)malloc(sizeof(cl_uint)*num_vertices);*/
-  
-
-  /*err = clEnqueueReadBuffer(commands, _edge_weights, CL_TRUE, 0, sizeof(cl_float)*num_edges,
-			    data, 0, NULL, NULL );
-  printArray(data, num_edges);
-  printf("\n");
-  printf(BAR);*/
-
-  
-
-  //Set distances
-  //Run Kernel
+  result = (cl_float *)malloc(sizeof(cl_float)*num_vertices); 
+  clFinish(commands);
   cl_uint i;
-  
-  /*err = clEnqueueNDRangeKernel(commands, update_vertex_kernel, 1, NULL, global, local, 0, NULL, NULL);
-  clFinish(commands);
-  err = clEnqueueReadBuffer(commands, _distances, CL_TRUE, 0, sizeof(cl_float)*num_vertices,
-			    result, 0, NULL, NULL );
-  clFinish(commands);
-  printArray(result, num_vertices);
-  err = clEnqueueReadBuffer(commands, _edge_count, CL_TRUE, 0, sizeof(cl_float)*num_vertices,
-				check, 0, NULL, NULL );
-  if(num_vertices < 128) UIprintArray(check, num_vertices);
-  return 0;*/
-  
+  cl_uint update;
+  cl_uint *preds = (cl_uint *)malloc(sizeof(cl_uint)*num_vertices);
   struct timeval start, end, delta;
   gettimeofday(&start, NULL);
-  cl_uint update;
-  
-  clFinish(commands);
-  err = clEnqueueNDRangeKernel(commands, update_vertex_kernel, 1, NULL, global, local, 0, NULL, NULL);
-  check_failure(err);
-  clFinish(commands);
-  err = clEnqueueReadBuffer(commands, _distances, CL_TRUE, 0, sizeof(cl_float)*num_vertices,
-				result, 0, NULL, NULL );
-  clFinish(commands);
-  printArray(result, 100);
-  err = clEnqueueReadBuffer(commands, _update, CL_TRUE, 0, sizeof(cl_uint),
-			    &update, 0, NULL, NULL );
-  printf("Round %d, update: %d \n", 1, update);
-  
-  return 0;
   for(i = 0; i < num_vertices; i++) {
-    //err = clEnqueueNDRangeKernel(commands, update_vertex_kernel, 1, NULL, global, local, 0, NULL, NULL);
+    /*
+    err = clEnqueueReadBuffer(commands, _distances, CL_TRUE, 0, sizeof(cl_float)*128,
+			      result, 0, NULL, NULL );
+    err = clEnqueueReadBuffer(commands, _preds, CL_TRUE, 0, sizeof(cl_float)*128,
+			      preds, 0, NULL, NULL );
     clFinish(commands);
-    //Printing
-    if(num_vertices < 128) {
-      err = clEnqueueReadBuffer(commands, _distances, CL_TRUE, 0, sizeof(cl_float)*num_vertices,
-				result, 0, NULL, NULL );
-    }
-    err = clEnqueueReadBuffer(commands, _distances, CL_TRUE, 0, sizeof(cl_float)*num_vertices,
-				result, 0, NULL, NULL );
+    //    printArray(result, 64);
+    //UIprintArray(preds, 64);
+    */
+    err = clEnqueueNDRangeKernel(commands, update_vertex_kernel, 1, NULL, global, local, 0, NULL, NULL);
+    clFinish(commands);
     err = clEnqueueReadBuffer(commands, _update, CL_TRUE, 0, sizeof(cl_uint),
 			      &update, 0, NULL, NULL );
     clFinish(commands);
     printf("Round %d, update: %d \n", i, update);
-    if(num_vertices < 128) printArray(result, num_vertices);
-    printArray(result, 5);
     if(!update) break;
   }
+  err = clEnqueueReadBuffer(commands, _distances, CL_TRUE, 0, sizeof(cl_float)*num_vertices,
+				result, 0, NULL, NULL );
+  clFinish(commands);
+  printArray(result, 64);
   check_failure(err);
   clFinish(commands);
   gettimeofday(&end, NULL);
@@ -804,18 +771,6 @@ int main(int argc, char **argv) {
   
 
   //Do the computation on the CPU to verify.
-  free(result);
-  result = NULL;
-  printf("Running computation on the CPU.\n");
-  printf(BAR);
-  gettimeofday(&start, NULL);
-  gettimeofday(&end, NULL);
-  delta = tv_delta(start, end);
-  printf("CPU time: %ld.%06ld\n", 
-	  (long int)delta.tv_sec, 
-	  (long int)delta.tv_usec);
-
-  printf(BAR);
   printf("Cleanup.\n");
   //Device Cleanup.
   clReleaseProgram(program);
