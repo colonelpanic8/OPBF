@@ -174,13 +174,14 @@ __kernel void UpdateVertex(
   uint local_id = get_local_id(0);
   uint __local current_edge[LOCAL_WORK_SIZE];
   uint __local remaining_edges[LOCAL_WORK_SIZE];
-  float __local e_weights[LOCAL_WORK_SIZE][HALF_WARP+1]; //since threads access this array colum
+  float __local e_weights[LOCAL_WORK_SIZE][HALF_WARP+1]; //since threads access this array columnwise
   uint __local  e_sources[LOCAL_WORK_SIZE][HALF_WARP+1];
   uint loading_id = local_id;
-  int offset = 0;
+  uint offset = 0;
   uint i;
   float min = distances[start+local_id];
-  uint __local did_update = 0;
+  bool __local did_update = 0;
+  if(get_global_id(0) == 0) update[0] = 0;
   if(local_id >= HALF_WARP) {
     loading_id = local_id - (HALF_WARP);
     offset = 1;
@@ -190,42 +191,29 @@ __kernel void UpdateVertex(
   
   while(remaining_edges[0] > 0) {
     for(i = 0; i < LOCAL_WORK_SIZE; i += 2) {
-      e_weights[i+offset][loading_id] = edge_weights[current_edge[i+offset]+loading_id];
-      e_sources[i+offset][loading_id] = edge_source[current_edge[i+offset]+loading_id];
-      /*
-      LoadLocalToGlobalf((edge_weights + current_edge[i+offset]),
-			 e_weights + (i+offset)*(HALF_WARP+1), 
-			remaining_edges[i+offset],
-			loading_id);
-      LoadLocalToGlobali((edge_source + current_edge[i+offset]),
-			 e_sources + (i+offset)*(HALF_WARP+1), 
-			 remaining_edges[i+offset],
-			 loading_id);
-      */
+      if(remaining_edges[i+offset] > loading_id) {
+	e_weights[i+offset][loading_id] = edge_weights[current_edge[i+offset]+loading_id];
+	e_sources[i+offset][loading_id] = edge_source[current_edge[i+offset]+loading_id];
+      }
     }
+    barrier(CLK_LOCAL_MEM_FENCE);
     uint max = MIN(HALF_WARP,remaining_edges[local_id]);
     for(i = 0; i < max; i++) {
-    //possible optimization: see if the edge weight in question is,
-    //by itself, smaller than the min value so far
-    //if not, don't even bother with the global load from memory
       float temp = distances[e_sources[local_id][i]];
       if(temp < INFINITY) {
 	temp = e_weights[local_id][i] + temp;
 	if(min > temp) {
+	  did_update = 1;
 	  min = temp;
-	  /*if(!did_update) {
-	    did_update = 1;
-	    }*/
 	}
       }
-      current_edge[local_id] += HALF_WARP;
-      remaining_edges[local_id] -= HALF_WARP;
     }
+    current_edge[local_id] += HALF_WARP;
+    remaining_edges[local_id] -= HALF_WARP;
   }
-  distances[start+local_id] = min;
-  //if(did_update) {
-    
-    //if(local_id == 0)
-      //*update = did_update;
-  //  }
+  barrier(CLK_LOCAL_MEM_FENCE);
+  if(did_update) {
+    distances[start+local_id] = min;
+    if(local_id == 0) update[0] = 1;
+  }
 }
