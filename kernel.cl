@@ -172,6 +172,7 @@ __kernel void UpdateVertex(
   
   uint start = get_group_id(0) * LOCAL_WORK_SIZE;
   uint local_id = get_local_id(0);
+  uint gid = get_global_id(0);
   uint __local current_edge[LOCAL_WORK_SIZE];
   uint __local remaining_edges[LOCAL_WORK_SIZE];
   float __local e_weights[LOCAL_WORK_SIZE][HALF_WARP+1]; //since threads access this array columnwise
@@ -181,13 +182,14 @@ __kernel void UpdateVertex(
   uint i;
   float min = distances[start+local_id];
   bool __local did_update = 0;
-  if(get_global_id(0) == 0) update[0] = 0;
+  if(gid == 0) update[0] = 0;
   if(local_id >= HALF_WARP) {
     loading_id = local_id - (HALF_WARP);
     offset = 1;
   }
-  current_edge[local_id] = vertex_index[get_global_id(0)];
-  remaining_edges[local_id] = num_edges[get_global_id(0)];
+  current_edge[local_id] = vertex_index[gid];
+  remaining_edges[local_id] = num_edges[gid];
+  barrier(CLK_LOCAL_MEM_FENCE);
   
   while(remaining_edges[0] > 0) {
     for(i = 0; i < LOCAL_WORK_SIZE; i += 2) {
@@ -210,8 +212,8 @@ __kernel void UpdateVertex(
     }
     current_edge[local_id] += HALF_WARP;
     remaining_edges[local_id] -= HALF_WARP;
+    barrier(CLK_LOCAL_MEM_FENCE);
   }
-  barrier(CLK_LOCAL_MEM_FENCE);
   if(did_update) {
     distances[start+local_id] = min;
     if(local_id == 0) update[0] = 1;

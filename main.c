@@ -28,7 +28,7 @@
 #define LOCAL_WORK_SIZE 32
 #define MAX_RANDOM_FLOAT 10
 #define DEFAULT_NUM_VERTICES 32*16*16*16
-#define DEFAULT_NUM_EDGES 16*DEFAULT_NUM_VERTICES
+#define DEFAULT_NUM_EDGES 4*DEFAULT_NUM_VERTICES
 
 #define DEFAULT_KERNEL_FILENAME ("kernel.cl")
 #define problem(...) fprintf(stderr, __VA_ARGS__)
@@ -170,7 +170,7 @@ void generate_graph(cl_uint *vertex_index, cl_uint *edge_count,
     vertex_index[i] = n;
     for(j = 0; j < edges_per_vertex; j++) {
       edge_sources[n+j] = rand() % num_vertices;
-      edge_weights[n+j] = rand() % 400;
+      edge_weights[n+j] = rand() % 1000;
     }
     n += j;
     edge_count[i] = j;
