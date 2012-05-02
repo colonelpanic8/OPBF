@@ -5,10 +5,15 @@
 #define MIN(a,b) ((a) > (b) ? (b) : (a))
 
 typedef struct _edge {
-  cl_uint source;
-  cl_uint dest;
-  cl_float weight;
-} edge;
+  uint source;
+  uint dest;
+  float weight;
+} __attribute__ ((aligned (16))) edge;
+
+typedef struct _vertex {
+  uint num_edges;
+  uint index;
+} vertex;
 
 void LoadGlobalToLocalf(float __global *g, float __local *l, uint width, uint id);
 void LoadGlobalToLocali(uint __global *g, uint __local *l, uint width, uint id);
@@ -30,49 +35,52 @@ __kernel void InitDistances(__global float *distances)
 
 
 __kernel void UpdateVertex(
-			   __global uint *edge_source,
-			   __global float *edge_weights,
+			   __global edge *edges,
 			   __global float *distances,
-			   __global uint *vertex_index, //where the edges for a given vertex start in the edges arrays
-			   __global uint *num_edges, //is this neccesary? should it be computed with vertex_index
-			   __global uint *update
+			   __global vertex *vertices,
+			   __global uint *update,
+			   uint num_vertices,
+			   uint num_edges
 )
 {
-  
   uint start = get_group_id(0) * LOCAL_WORK_SIZE;
   uint local_id = get_local_id(0);
   uint gid = get_global_id(0);
   uint __local current_edge[LOCAL_WORK_SIZE];
   int __local remaining_edges[LOCAL_WORK_SIZE];
-  float __local e_weights[LOCAL_WORK_SIZE][HALF_WARP+1]; //since threads access this array columnwise
-  uint __local  e_sources[LOCAL_WORK_SIZE][HALF_WARP+1];
-  uint loading_id = local_id;
+  edge __local work[LOCAL_WORK_SIZE][HALF_WARP+1];
+  vertex __local nodes[LOCAL_WORK_SIZE];
+  int loading_id = local_id;
   uint offset = 0;
   uint i;
   float min = distances[start+local_id];
   bool __local did_update = 0;
+  bool __local done = 0;
   if(gid == 0) update[0] = 0;
   if(local_id >= HALF_WARP) {
     loading_id = local_id - (HALF_WARP);
     offset = 1;
   }
-  current_edge[local_id] = vertex_index[gid];
-  remaining_edges[local_id] = num_edges[gid];
+  if(gid < num_vertices) {
+    nodes[local_id] = vertices[gid];
+    remaining_edges[local_id] = nodes[local_id].num_edges;
+    current_edge[local_id] = nodes[local_id].index;
+  } else {
+    remaining_edges[local_id] = 0;
+  }
   barrier(CLK_LOCAL_MEM_FENCE);
-
-  while(remaining_edges[0] > 0) {
+  while(!done) {
     for(i = 0; i < LOCAL_WORK_SIZE; i += 2) {
       if(remaining_edges[i+offset] > loading_id) {
-	e_weights[i+offset][loading_id] = edge_weights[current_edge[i+offset]+loading_id];
-	e_sources[i+offset][loading_id] = edge_source[current_edge[i+offset]+loading_id];
+	work[i+offset][loading_id] = edges[current_edge[i+offset]+loading_id];
       }
     }
     barrier(CLK_LOCAL_MEM_FENCE);
     uint max = MIN(HALF_WARP,remaining_edges[local_id]);
     for(i = 0; i < max; i++) {
-      float temp = distances[e_sources[local_id][i]];
+      float temp = distances[work[local_id][i].source];
       if(temp < INFINITY) {
-	temp = e_weights[local_id][i] + temp;
+	temp = work[local_id][i].weight + temp;
 	if(min > temp) {
 	  did_update = 1;
 	  min = temp;
@@ -81,6 +89,10 @@ __kernel void UpdateVertex(
     }
     current_edge[local_id] += HALF_WARP;
     remaining_edges[local_id] -= HALF_WARP;
+    if(local_id == 0)
+      done = 1;
+    if(remaining_edges[local_id] > 0)
+      done = 0;
     barrier(CLK_LOCAL_MEM_FENCE);
   }
   if(did_update) {

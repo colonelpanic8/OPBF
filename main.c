@@ -30,14 +30,26 @@ typedef struct _edge {
   cl_uint source;
   cl_uint dest;
   cl_float weight;
-} edge;
+}__attribute__ ((aligned (16))) edge;
+
+typedef struct _gpu_edge {
+  cl_uint source;
+  cl_float weight;
+} gpu_edge;
+
+typedef struct _vertex {
+  cl_uint num_edges;
+  cl_uint index;
+} vertex;
+
+
 
 #define PRINT
 //#define DOMM
 #define LOCAL_WORK_SIZE 32
 #define MAX_RANDOM_FLOAT 10
-#define DEFAULT_NUM_VERTICES 32*32*2
-#define DEFAULT_NUM_EDGES 35*DEFAULT_NUM_VERTICES
+#define DEFAULT_NUM_VERTICES 32
+#define DEFAULT_NUM_EDGES 16*DEFAULT_NUM_VERTICES
 
 #define DEFAULT_KERNEL_FILENAME ("kernel.cl")
 #define problem(...) fprintf(stderr, __VA_ARGS__)
@@ -219,7 +231,7 @@ void generate_graph2(cl_uint *vertex_index, cl_uint *edge_count,
 }
 
 void print_edges(edge *edges, cl_uint num) {
-  int i,j;
+  cl_uint i,j;
   for(i = 0; i < num; i += PRINT_ROW_LENGTH) {
     for(j = 0; j < PRINT_ROW_LENGTH; j++) {
       if(i+j >= num)
@@ -243,13 +255,11 @@ int destcomp(const void *a, const void *b) {
   return f->dest - s->dest;
 }
 
-cl_uint graph_data_from_file(char *filename, edge **res, cl_uint *a){
+cl_uint graph_data_from_file(char *filename, edge **res){
   FILE *file;
   char buffer[256];
   size_t i;
   edge *edges;
-  cl_uint max;
-  max = 0;
   file = fopen(filename, "r");
   buffer[0] = '\0';
 
@@ -266,15 +276,32 @@ cl_uint graph_data_from_file(char *filename, edge **res, cl_uint *a){
     fgets(buffer, 256, file);
   do {
     sscanf(buffer, "a %u %u %f", &(edges[i].dest), &(edges[i].source), &(edges[i].weight));
-    if(edges[i].dest > max) 
-      max = edges[i].dest;
+    edges[i].dest -= 1;
+    edges[i].source -= 1;
     i++;
   } while(fgets(buffer, 256, file));
-  print_edges(edges, 128);
   mergesort(edges, i, sizeof(edge), destcomp);
   *res = edges;
-  *a = max;
   return i;
+}
+
+cl_uint build_vertex_array(edge *edges, cl_uint edge_count, vertex **v) {
+  cl_uint max = edges[edge_count - 1].dest;
+  vertex *vertices = (vertex *)malloc(sizeof(vertex)*max);
+  cl_uint i,j, last = 0;
+  j = 0;
+  i = edges[j].dest;
+  while(j < edge_count) {
+    while(edges[j].dest == i && j < edge_count) {
+      j++;
+    }
+    vertices[i].num_edges = j - last;
+    vertices[i].index = last;
+    last = j;
+    i = edges[j].dest;
+  }
+  *v = vertices;
+  return max;
 }
 
 
@@ -558,11 +585,6 @@ cl_float *matrix_multiply(cl_program program, cl_context context, cl_command_que
 
 int main(int argc, char **argv) {
   cl_int err;
-  edge *edges;
-  cl_uint max;
-  cl_uint num = graph_data_from_file("NewYorkRM", &edges, &max);
-  print_edges(edges, 128);
-  return 0;
 
   //Get device id.
   cl_device_id device_id;
@@ -617,41 +639,21 @@ int main(int argc, char **argv) {
   }
   update_vertex_kernel = clCreateKernel(program, "UpdateVertex", &err);
   init_distances_kernel = clCreateKernel(program, "InitDistances", &err);
+  check_failure(err);
   
   //
 
-
-  check_failure(err);
+  edge *edges;
+  vertex *vertices;
+  char name[] = "NewYorkRM";
   
-  cl_uint num_vertices = DEFAULT_NUM_VERTICES;
-  cl_uint num_edges = DEFAULT_NUM_EDGES;
-
-  if(argc > 2) {
-    num_vertices = atoi(argv[1]);
-    num_edges = atoi(argv[2]);
-  }
-    
-  cl_float *edge_weights = (cl_float *)malloc(sizeof(cl_float)*num_edges);
+  cl_uint num_edges = graph_data_from_file(name, &edges);
+  cl_uint num_vertices  = build_vertex_array(edges, num_edges, &vertices);
   cl_float *distances = (cl_float *)malloc(sizeof(cl_float)*num_vertices);
-  cl_uint  *edge_sources = (cl_uint *)malloc(sizeof(cl_uint)*num_edges);
-  cl_uint  *vertex_index = (cl_uint *)malloc(sizeof(cl_uint)*num_vertices);
-  cl_uint  *edge_count = (cl_uint *)malloc(sizeof(cl_uint)*num_vertices);
-
-  generate_graph(vertex_index, edge_count, edge_sources, edge_weights,
-		 num_vertices, num_edges);
-#ifdef DOMM
-  cl_float *matrix = generate_matrix(vertex_index, edge_count, edge_sources, edge_weights,
-				     num_vertices, num_edges);
-  matrix_multiply(program, context, commands, matrix, num_vertices);
-#endif
-  memset(distances, 0, sizeof(cl_float)*num_vertices);
-  distances[0] = 0;
   
-  cl_mem _edge_sources;
-  cl_mem _edge_weights;
+  cl_mem _edges;
+  cl_mem _vertices;
   cl_mem _distances;
-  cl_mem _vertex_index;
-  cl_mem _edge_count;
   cl_mem _update;
   
 
@@ -661,22 +663,18 @@ int main(int argc, char **argv) {
   printf(BAR);
   //Create data buffers on the device.
   
-
-  _edge_sources = clCreateBuffer(context,  CL_MEM_READ_ONLY,
-				 sizeof(cl_uint)*num_edges,    NULL, NULL);
-  _edge_weights = clCreateBuffer(context,  CL_MEM_READ_ONLY,
-				 sizeof(cl_float)*num_edges,   NULL, NULL);
+  
   _distances    = clCreateBuffer(context, CL_MEM_READ_WRITE,
 				 sizeof(cl_float)*num_vertices, NULL, NULL);
-  _vertex_index = clCreateBuffer(context,  CL_MEM_READ_ONLY,
-				 sizeof(cl_uint)*num_vertices, NULL, NULL);
-  _edge_count   = clCreateBuffer(context,  CL_MEM_READ_ONLY,
-				 sizeof(cl_uint)*num_vertices, NULL, NULL);
+  _edges        = clCreateBuffer(context,  CL_MEM_READ_ONLY,
+				 sizeof(edge)*num_edges,   NULL, NULL);
+  _vertices     = clCreateBuffer(context,  CL_MEM_READ_ONLY,
+				 sizeof(vertex)*num_vertices, NULL, NULL);
   _update       = clCreateBuffer(context, CL_MEM_READ_WRITE,
 				 sizeof(cl_uint), NULL, NULL);
 
   
-  if(!_edge_sources || !_edge_weights || !_distances || !_vertex_index || !_edge_count || !_update) {
+  if(!_vertices || !_edges || !_distances || !_update) {
     problem("Failed to allocate device memory.\n");
     exit(-1);
   }
@@ -684,14 +682,10 @@ int main(int argc, char **argv) {
   printf("Putting data into device memory.\n");
   printf(BAR);
   //Put data into device Memory.
-  err  =  clEnqueueWriteBuffer(commands, _edge_sources, CL_TRUE, 0, 
-			       sizeof(cl_uint)*num_edges , edge_sources, 0, NULL, NULL);
-  err |=  clEnqueueWriteBuffer(commands, _edge_weights, CL_TRUE, 0,
-			       sizeof(cl_float)*num_edges, edge_weights, 0, NULL, NULL);
-  err |=  clEnqueueWriteBuffer(commands, _vertex_index, CL_TRUE, 0,
-			       sizeof(cl_uint)*num_vertices, vertex_index, 0, NULL, NULL);
-  err |=  clEnqueueWriteBuffer(commands, _edge_count, CL_TRUE, 0,
-			       sizeof(cl_uint)*num_vertices, edge_count, 0, NULL, NULL);
+  err  =  clEnqueueWriteBuffer(commands, _edges, CL_TRUE, 0, 
+			       sizeof(edge)*num_edges , edges, 0, NULL, NULL);
+  err |=  clEnqueueWriteBuffer(commands, _vertices, CL_TRUE, 0,
+			       sizeof(vertex)*num_vertices, vertices, 0, NULL, NULL);
 
   check_failure(err);
 
@@ -704,24 +698,25 @@ int main(int argc, char **argv) {
   err  =  clSetKernelArg(init_distances_kernel, 0, sizeof(cl_mem), &_distances);
 
 
-  err  =  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_edge_sources);
-  err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_edge_weights);
+  err  =  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_edges);
   err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_distances);
-  err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_vertex_index);
-  err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_edge_count);
+  err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_vertices);
   err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_mem), &_update);
+  err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_uint), &num_vertices);
+  err |=  clSetKernelArg(update_vertex_kernel, a++, sizeof(cl_uint), &num_edges);
   
   check_failure(err);
 
   clFinish(commands);
   printf("Running.\n");
   printf(BAR);
-  size_t global[] = {num_vertices};
+  
+  size_t global[] = {num_vertices + LOCAL_WORK_SIZE - (num_vertices % LOCAL_WORK_SIZE)};
   size_t local[] = {LOCAL_WORK_SIZE};
   //Run our program.
 
 
-  clEnqueueNDRangeKernel(commands, init_distances_kernel, 1, NULL, global, NULL, 0, NULL, NULL);
+ clEnqueueNDRangeKernel(commands, init_distances_kernel, 1, NULL, global, NULL, 0, NULL, NULL);
   cl_float *result;
   result = (cl_float *)malloc(sizeof(cl_float)*num_vertices);
   /*
@@ -730,8 +725,6 @@ int main(int argc, char **argv) {
   cl_uint *check;
   check = (cl_uint *)malloc(sizeof(cl_uint)*num_vertices);*/
   
-  clFinish(commands);
-
 
   /*err = clEnqueueReadBuffer(commands, _edge_weights, CL_TRUE, 0, sizeof(cl_float)*num_edges,
 			    data, 0, NULL, NULL );
@@ -742,7 +735,6 @@ int main(int argc, char **argv) {
   
 
   //Set distances
-  clFinish(commands);
   //Run Kernel
   cl_uint i;
   
@@ -760,19 +752,36 @@ int main(int argc, char **argv) {
   struct timeval start, end, delta;
   gettimeofday(&start, NULL);
   cl_uint update;
+  
+  clFinish(commands);
+  err = clEnqueueNDRangeKernel(commands, update_vertex_kernel, 1, NULL, global, local, 0, NULL, NULL);
+  check_failure(err);
+  clFinish(commands);
+  err = clEnqueueReadBuffer(commands, _distances, CL_TRUE, 0, sizeof(cl_float)*num_vertices,
+				result, 0, NULL, NULL );
+  clFinish(commands);
+  printArray(result, 100);
+  err = clEnqueueReadBuffer(commands, _update, CL_TRUE, 0, sizeof(cl_uint),
+			    &update, 0, NULL, NULL );
+  printf("Round %d, update: %d \n", 1, update);
+  
+  return 0;
   for(i = 0; i < num_vertices; i++) {
-    err = clEnqueueNDRangeKernel(commands, update_vertex_kernel, 1, NULL, global, local, 0, NULL, NULL);
+    //err = clEnqueueNDRangeKernel(commands, update_vertex_kernel, 1, NULL, global, local, 0, NULL, NULL);
     clFinish(commands);
     //Printing
     if(num_vertices < 128) {
       err = clEnqueueReadBuffer(commands, _distances, CL_TRUE, 0, sizeof(cl_float)*num_vertices,
 				result, 0, NULL, NULL );
     }
+    err = clEnqueueReadBuffer(commands, _distances, CL_TRUE, 0, sizeof(cl_float)*num_vertices,
+				result, 0, NULL, NULL );
     err = clEnqueueReadBuffer(commands, _update, CL_TRUE, 0, sizeof(cl_uint),
 			      &update, 0, NULL, NULL );
     clFinish(commands);
     printf("Round %d, update: %d \n", i, update);
     if(num_vertices < 128) printArray(result, num_vertices);
+    printArray(result, 5);
     if(!update) break;
   }
   check_failure(err);
@@ -814,20 +823,14 @@ int main(int argc, char **argv) {
   clReleaseKernel(init_distances_kernel);
   clReleaseCommandQueue(commands);
   clReleaseContext(context);
-
-  clReleaseMemObject(_edge_sources);
-  clReleaseMemObject(_edge_weights);
   clReleaseMemObject(_distances);
-  clReleaseMemObject(_vertex_index);
-  clReleaseMemObject(_edge_count);
+  clReleaseMemObject(_vertices);
+  clReleaseMemObject(_edges);
 
   //Memory Cleanup.
-  free(edge_sources);
-  free(edge_weights);
-  free(distances);
-  free(vertex_index);
-  free(edge_count);
-  
+  free(edges);
+  free(vertices);
+  free(distances);  
   
   return 0;
 }
