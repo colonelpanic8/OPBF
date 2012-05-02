@@ -25,10 +25,12 @@
 
 /*--------------------------------------------------------------------------------*/
 
+#define PRINT
+//#define DOMM
 #define LOCAL_WORK_SIZE 32
 #define MAX_RANDOM_FLOAT 10
-#define DEFAULT_NUM_VERTICES 32*2
-#define DEFAULT_NUM_EDGES 5*DEFAULT_NUM_VERTICES
+#define DEFAULT_NUM_VERTICES 32*32*2
+#define DEFAULT_NUM_EDGES 35*DEFAULT_NUM_VERTICES
 
 #define DEFAULT_KERNEL_FILENAME ("kernel.cl")
 #define problem(...) fprintf(stderr, __VA_ARGS__)
@@ -138,13 +140,13 @@ void printArray(cl_float *matrix, cl_int num) {
     for(j = 0; j < PRINT_ROW_LENGTH; j++) {
       if(i+j > num)
 	break;
-      printf("%3d ", i+j);
+      printf("%4d ", i+j);
     }
     printf("\n");
     for(j = 0; j < PRINT_ROW_LENGTH; j++) {
       if(i+j > num)
 	break;
-      printf("%3.0f ", matrix[i+j]);
+      printf("%4.0f ", matrix[i+j]);
     }
     printf("\n");
     printf(BAR);
@@ -157,13 +159,13 @@ void UIprintArray(cl_uint *matrix, cl_int num) {
     for(j = 0; j < PRINT_ROW_LENGTH; j++) {
       if(i+j > num)
 	break;
-      printf("%3d ", i+j);
+      printf("%4d ", i+j);
     }
     printf("\n");
     for(j = 0; j < PRINT_ROW_LENGTH; j++) {
       if(i+j > num)
 	break;
-      printf("%3d ", matrix[i+j]);
+      printf("%4d ", matrix[i+j]);
     }
     printf("\n");
     printf(BAR);
@@ -209,14 +211,6 @@ void generate_graph2(cl_uint *vertex_index, cl_uint *edge_count,
   }
 }
 
-cl_float *generate_matrix(cl_uint *vertex_index, cl_uint *edge_count,
-			  cl_uint *edge_sources, float *edge_weights, cl_uint num_vertices, 
-			  cl_uint num_edges) {
-  int i;
-  cl_float *output = malloc(num_vertices*num_vertices*sizeof(cl_float));
-  for(i = 0; i < num_edges; i++)
-}
-
 
 /*--------------------------------------------------------------------------------*/
 
@@ -229,6 +223,268 @@ struct timeval tv_delta(struct timeval start, struct timeval end){
     delta.tv_sec--;
   }
   return delta;
+}
+
+/*--------------------------------------------------------------------------------*/
+
+cl_int *getMatrixFromFile(char *filename, cl_int *size) {
+  FILE *fh;
+  cl_int *output;
+  int i, matrix_size;
+
+  fh = fopen(filename, "r");
+  if(!fh)
+    problem("file failed to open\n");
+  
+  fscanf(fh, "%d", &matrix_size);
+  *size = matrix_size;
+  output = (cl_int *)malloc(sizeof(cl_int)*matrix_size*matrix_size);
+
+  if(!output)
+    exit(-1);
+  for(i = 0; i < matrix_size*matrix_size; i++) {
+      fscanf(fh, "%d", &(output[i]));
+  }
+  return output;
+}
+
+cl_float *randomMatrix(int size) {
+  int num = size*size;
+  cl_float *output = (cl_float *)malloc(sizeof(cl_float)*num);
+  int i, j;
+  for(i = 0; i < size; i++) {
+    output[i] = INFINITY;
+  }
+  for(i = 0; i < size; i++) {
+    memmove(output + size*i, output, size*sizeof(cl_float));
+  }
+  srand(time(NULL));
+  for(i = 0; i < size; i++) {
+    for(j = 0; j < size/4; j++) {
+      int index = rand() % size;
+      output[size*i + index] = rand() % 400;
+    }
+    output[size*i + i] = 0;
+  }
+  return output;
+}
+
+cl_uint *initPreds(int size) {
+  cl_uint *output = (cl_uint *)malloc(sizeof(cl_uint)*size*size);
+  int i;
+  for(i = 0; i < size*size; i++) {
+    output[i] = i/size + 1;
+  }
+  return output;
+}
+
+void printMatrix(cl_float *matrix, cl_int rows, cl_int cols) {
+  int i;
+  printf("%4.0f ", (float)-1); 
+  for(i = 0; i < cols; i++)
+    printf("%4.0d ",i+1); 
+  printf("\n");
+  for(i=0; i<cols; i++)
+    printf("_____");
+  printf("____");
+    
+  
+  for(i = 0; i < rows*cols; i++) {
+    if(i % cols == 0) {
+      printf("\n");
+      printf("%4d|", (i/cols + 1));
+    }
+    if(matrix[i] > 4000000)
+      matrix[i] = INFINITY;
+    printf("%4.0f ", matrix[i]);
+  }
+  printf("\n");
+}
+
+void printPreds(cl_uint *matrix, cl_int size) {
+  int i;
+  printf("%4.0f ", (float)-1); 
+  for(i = 0; i < size; i++)
+    printf("%4.0d ", i+1); 
+  printf("\n");
+  for(i=0; i<size; i++)
+    printf("_____");
+  printf("____");
+  for(i = 0; i < size*size; i++) {
+    if(i % size == 0) {
+      printf("\n");
+      printf("%4d|", (i/size + 1));
+    }
+    printf("%4d ", matrix[i]);
+  }
+  printf("\n");
+}
+
+cl_float *generate_matrix(cl_uint *vertex_index, cl_uint *edge_count,
+			  cl_uint *edge_sources, float *edge_weights, cl_uint num_vertices, 
+			  cl_uint num_edges) {
+  cl_uint i,j,k;
+  cl_float *output = (cl_float*)malloc(num_vertices*num_vertices*sizeof(cl_float));
+  for(i = 0; i < num_vertices; i++) {
+    output[i] = INFINITY;
+  }
+  for(i = 0; i < num_vertices; i++) {
+    memmove(output + num_vertices*i, output, num_vertices*sizeof(cl_float));
+  }
+  for(i = 0; i < num_vertices; i++) {
+    k = vertex_index[i]; 
+    for(j = 0; j < edge_count[i]; j++) {
+      int source = edge_sources[k+j];
+      float weight = edge_weights[k+j];
+	if(output[source*num_vertices + i] > weight)
+	  output[source*num_vertices + i] = weight;
+    }
+    output[num_vertices*i + i] = 0;
+  }
+  return output;
+}
+
+/*--------------------------------------------------------------------------------*/
+#define BLOCK_SIZE 16
+
+cl_float *matrix_multiply(cl_program program, cl_context context, cl_command_queue commands, cl_float *matrix,
+		     cl_uint nv) {
+  cl_int err;
+  cl_kernel kernel;
+  cl_int m_size = nv;
+  kernel = clCreateKernel(program, "matrix_product", &err);
+  check_failure(err);
+  
+  printf(BAR);
+  //Read matrices from file
+  cl_uint *preds_init;
+  cl_mem input;
+  cl_mem input2;
+  cl_mem preds;
+  preds_init = initPreds(m_size);
+   
+  
+#ifdef PRINT
+  if(m_size < 100) {
+    printMatrix(matrix, m_size, m_size);
+    printf(BAR);
+    printPreds(preds_init, m_size);
+  }
+#endif
+  
+  printf("Creating data buffers.\n");
+  printf(BAR);
+  //Create data buffers on the device.
+  input = clCreateBuffer(context, CL_MEM_READ_WRITE,  sizeof(cl_float)*m_size*m_size, NULL, NULL);
+
+  input2 = clCreateBuffer(context,  CL_MEM_READ_WRITE,  sizeof(cl_float)*m_size*m_size, NULL, NULL);
+  
+  preds = clCreateBuffer(context, CL_MEM_READ_WRITE,  sizeof(cl_uint)*m_size*m_size, NULL, NULL);
+  
+  if(!input || !input2 || !preds ) {
+    problem("Failed to allocate device memory.\n");
+    exit(-1);
+  }
+  
+  err = 0;
+  printf("Putting data into device memory.\n");
+  printf(BAR);
+  //Put data into device Memory.
+  err  =  clEnqueueWriteBuffer(commands, input, CL_TRUE, 0, 
+  		       sizeof(cl_float)*m_size*m_size, matrix, 0, NULL, NULL);
+  err  =  clEnqueueWriteBuffer(commands, preds, CL_TRUE, 0, 
+  		       sizeof(cl_uint)*m_size*m_size, preds_init, 0, NULL, NULL);
+  check_failure(err);
+  
+  printf("Setting Kernel Arguments.\n");
+  printf(BAR);
+  //Set arguments.
+  int i = 0;
+  err  =  clSetKernelArg(kernel, i++, sizeof(cl_mem), &input);
+  err |=  clSetKernelArg(kernel, i++, sizeof(cl_mem), &input2);
+  err |=  clSetKernelArg(kernel, i++, sizeof(cl_mem), &preds);
+  err |=  clSetKernelArg(kernel, i++, sizeof(cl_int), &m_size);
+  check_failure(err);
+
+  //Determine work group size.
+  size_t global_size[] = {m_size, m_size};
+  size_t local_size[] = {BLOCK_SIZE, BLOCK_SIZE};
+  
+  printf("Running.\n");
+  printf(BAR);
+  clFinish(commands);
+  //Run our program.
+  struct timeval start, end, delta;
+  gettimeofday(&start, NULL);
+  int exp = 1;
+  while(exp < m_size) {
+    err = clEnqueueNDRangeKernel(commands, kernel, 2, NULL, global_size, local_size, 0, NULL, NULL);
+    check_failure(err);
+    clFinish(commands);
+    exp = exp*2;
+    i = 0;
+    clSetKernelArg(kernel, i++, sizeof(cl_mem), &input2);
+    clSetKernelArg(kernel, i, sizeof(cl_mem), &input);
+    clFinish(commands);
+    err = clEnqueueNDRangeKernel(commands, kernel, 2, NULL, global_size, local_size, 0, NULL, NULL);
+    clFinish(commands);
+    exp = exp*2;
+    i = 0;
+    clSetKernelArg(kernel, i++, sizeof(cl_mem), &input);
+    clSetKernelArg(kernel, i, sizeof(cl_mem), &input2);
+    printf("%d\n", exp);
+    clFinish(commands);
+  }
+  gettimeofday(&end, NULL);
+  delta = tv_delta(start, end);
+  printf("GPU Time: %ld.%06ld\n", 
+	 (long int)delta.tv_sec, 
+	 (long int)delta.tv_usec);
+  printf(BAR);
+  
+  printf("Getting data.\n");
+  printf(BAR);
+  //Retrieve and print output.
+  cl_float *result;
+  cl_uint *preds_result;
+  result = (cl_float *)malloc(sizeof(cl_float)*m_size*m_size);
+  preds_result = (cl_uint *)malloc(sizeof(cl_int)*m_size*m_size);
+  err = clEnqueueReadBuffer(commands, input2, CL_TRUE, 0, sizeof(cl_float)*m_size*m_size,
+			    result, 0, NULL, NULL );
+  err = clEnqueueReadBuffer(commands, preds, CL_TRUE, 0, sizeof(cl_uint)*m_size*m_size,
+			    preds_result, 0, NULL, NULL );
+  check_failure(err);
+  
+  /*
+  printMatrix(matrix, m_size, m_size);
+  printf("*\n");
+  printMatrix(right_matrix, m_size, m_size);
+  printf("=\n");
+  printMatrix(result, m_size, m_size);
+  */
+
+  //Do the computation on the CPU to verify.
+  
+#ifdef PRINT
+  if(m_size < 100) {
+    printMatrix(result, m_size, m_size);
+    printf(BAR);
+    printPreds(preds_result, m_size);
+  }
+#endif
+
+
+  printf(BAR);
+  printf("Cleanup.\n");
+  //Device Cleanup.
+  clReleaseKernel(kernel);
+  clReleaseMemObject(input);
+  clReleaseMemObject(input2);
+
+  //Memory Cleanup.
+  free(result);
+  free(preds_result);
+  return matrix;
 }
 
 /*--------------------------------------------------------------------------------*/
@@ -289,6 +545,10 @@ int main(int argc, char **argv) {
   }
   update_vertex_kernel = clCreateKernel(program, "UpdateVertex", &err);
   init_distances_kernel = clCreateKernel(program, "InitDistances", &err);
+  
+  //
+
+
   check_failure(err);
   
   cl_uint num_vertices = DEFAULT_NUM_VERTICES;
@@ -307,6 +567,11 @@ int main(int argc, char **argv) {
 
   generate_graph(vertex_index, edge_count, edge_sources, edge_weights,
 		 num_vertices, num_edges);
+#ifdef DOMM
+  cl_float *matrix = generate_matrix(vertex_index, edge_count, edge_sources, edge_weights,
+				     num_vertices, num_edges);
+  matrix_multiply(program, context, commands, matrix, num_vertices);
+#endif
   memset(distances, 0, sizeof(cl_float)*num_vertices);
   distances[0] = 0;
   
