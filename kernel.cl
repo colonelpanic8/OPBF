@@ -6,15 +6,13 @@
 
 typedef struct _edge {
   uint source;
-  uint dest;
   float weight;
-} __attribute__ ((aligned (16))) edge;
+} __attribute__ ((aligned (8))) edge;
 
 typedef struct _vertex {
   uint num_edges;
   uint index;
-  uint spot;
-} __attribute__ ((aligned (16))) vertex;
+} __attribute__ ((aligned (8))) vertex;
 
 void LoadGlobalToLocalf(float __global *g, float __local *l, uint width, uint id);
 void LoadGlobalToLocali(uint __global *g, uint __local *l, uint width, uint id);

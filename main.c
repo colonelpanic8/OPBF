@@ -40,8 +40,7 @@ typedef struct _gpu_edge {
 typedef struct _vertex {
   cl_uint num_edges;
   cl_uint index;
-  cl_uint spot;
-  
+  cl_uint spot;  
 } __attribute__ ((aligned (16))) vertex;
 
 typedef struct _gpu_vertex {
@@ -330,7 +329,7 @@ cl_uint *make_map(vertex *v, cl_uint max) {
 
 cl_edge *make_gpu_edges(edge *edges, cl_uint num_edges) {
   cl_uint i;
-  cl_edge *res = malloc(sizeof(cl_edge)*num_edges);
+  cl_edge *res = (cl_edge *)malloc(sizeof(cl_edge)*num_edges);
   for(i = 0; i < num_edges; i++) {
     res[i].source = edges[i].source;
     res[i].weight = edges[i].weight;
@@ -338,12 +337,12 @@ cl_edge *make_gpu_edges(edge *edges, cl_uint num_edges) {
   return res;
 }
 
-cl_vertex *mak_gpu_vertices(vertex *vertices, cl_uint num_vertices) {
+cl_vertex *make_gpu_vertices(vertex *vertices, cl_uint num_vertices) {
   cl_uint i;
-  cl_edge *res = malloc(sizeof(cl_vertex)*num_vertices);
+  cl_vertex *res = (cl_vertex *)malloc(sizeof(cl_vertex)*num_vertices);
   for(i = 0; i < num_vertices; i++) {
-    res[i].source = vertices[i].num_edges;
-    res[i].weight = vertices[i].index;
+    res[i].num_edges = vertices[i].num_edges;
+    res[i].index = vertices[i].index;
   }
   return res;
 }
@@ -740,9 +739,9 @@ int main(int argc, char **argv) {
   printf(BAR);
   //Put data into device Memory.
   err  =  clEnqueueWriteBuffer(commands, _edges, CL_TRUE, 0, 
-			       sizeof(edge)*num_edges , edges, 0, NULL, NULL);
+			       sizeof(cl_edge)*num_edges , device_edges, 0, NULL, NULL);
   err |=  clEnqueueWriteBuffer(commands, _vertices, CL_TRUE, 0,
-			       sizeof(vertex)*num_vertices, vertices, 0, NULL, NULL);
+			       sizeof(cl_vertex)*num_vertices, device_vertices, 0, NULL, NULL);
   err |=  clEnqueueWriteBuffer(commands, _map, CL_TRUE, 0,
 			       sizeof(cl_uint)*num_vertices, map, 0, NULL, NULL);
 
